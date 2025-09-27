@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>Document</title>
+
+  <link rel=" stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.css" />
+  <link rel=" stylesheet" href="./style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
+</head>
+
+<body>
+  <div class="container">
+    <h1>Welcome to the chat</h1>
+
+    <div id="hostSection" class="host-section" style="display:none;">
+      <p>This is your Peer ID: <span id="peerId">---</span> <button id="copyPeerId">Copy</button></p>
+    </div>
+
+    <div id="guestSection" class="join-section" style="display:none;">
+      <div class="input-row">
+        <input type="text" id="peerInput" placeholder="Enter host's Peer ID">
+        <button id="joinBtn">Connect</button>
+      </div>
+    </div>
+
+    <div class="chat-section">
+      <div id="connectionStatus"></div>
+      <div id="chatBox" class="chat-box"></div>
+      <div class="message-row">
+        <input type="text" id="messageInput" placeholder="Type your message">
+        <button id="sendBtn">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- THIS IS THE MODAL AT THE START -->
+  <div id="modal" class="modal">
+    <div class="modal-content">
+      <h2>Welcome to the chat</h2>
+      <input type="text" id="userName" placeholder="Enter your name">
+      <div class="role-buttons">
+        <button id="hostBtn">Host</button>
+        <button id="guestBtn">Guest</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="./scripts.js"></script>
+</body>
+
+</html>
