@@ -1,187 +1,315 @@
-// ================================
-// Variables to store user info
-// ================================
-let userName = ""; // The name the user chooses
-let userRole = ""; // Either 'host' or 'guest'
-let peerName = ""; // The name of the other person in the chat
+// =====================================================
+// 1) App State (data we keep in memory while chat runs)
+// =====================================================
+let localUserName = "";
+let localUserRole = ""; // "host" or "guest"
+let remoteUserName = "";
 
-// ================================
-// DOM elements
-// ================================
-const modal = document.getElementById("modal"); // The modal at the start
-const userNameInput = document.getElementById("userName"); // Input field for user name
-const hostBtn = document.getElementById("hostBtn"); // Button to choose host
-const guestBtn = document.getElementById("guestBtn"); // Button to choose guest
+let localPeer = null; // PeerJS instance for this browser tab
+let activeConnection = null; // Active chat connection to the other user
 
-const hostSectionEl = document.getElementById("hostSection"); // Section that shows host UI
-const guestSectionEl = document.getElementById("guestSection"); // Section that shows guest UI
+// =====================================================
+// 2) DOM References (all HTML elements we interact with)
+// =====================================================
+const startModal = document.getElementById("modal");
+const nameInput = document.getElementById("userName");
+const nameRequiredMessage = document.getElementById("nameRequiredMessage");
+const hostRoleButton = document.getElementById("hostBtn");
+const guestRoleButton = document.getElementById("guestBtn");
 
-const peerIdDisplay = document.getElementById("peerId"); // Element to show host Peer ID
-const copyBtn = document.getElementById("copyPeerId"); // Button to copy host Peer ID
-const connectionStatus = document.getElementById("connectionStatus"); // Element showing connection status in green
+const greetingText = document.getElementById("greetingTitle");
+const onlineNameTop = document.getElementById("onlineName1");
+const onlineNameBottom = document.getElementById("onlineName2");
+const onlineDotTop = document.getElementById("onlineDot1");
+const onlineDotBottom = document.getElementById("onlineDot2");
 
-// ================================
-// Utility function to generate a short 8-character ID for the host (as in tic tac toe)
-// ================================
-function generateShortId() {
-  // Math.random().toString(36) gives random letters + numbers, substr(2, 8) takes 8 characters skipping '0.'
-  // Had to learn about Base-36 | .toString(36) convert that number into base-36 (digits + letters)
-  // Starting at index 2 means we skip "0." and grab the next 8 characters
+const hostJoinCodeSection = document.getElementById("hostSection");
+const guestJoinCodeSection = document.getElementById("guestSection");
+
+const joinCodeText = document.getElementById("peerId");
+const copyJoinCodeButton = document.getElementById("copyPeerId");
+const joinCodeInput = document.getElementById("peerInput");
+const joinChatButton = document.getElementById("joinBtn");
+
+const chatMessagesContainer = document.getElementById("chatBox");
+const messageTextInput = document.getElementById("messageInput");
+const sendMessageButton = document.getElementById("sendBtn");
+
+// Sound that the receiver hears when a new message arrives
+const incomingMessageSound = new Audio("./assets/pop-sound.wav");
+incomingMessageSound.preload = "auto";
+
+// =====================================================
+// 3) Small Utility Helpers
+// =====================================================
+
+// Create a short random 8-character code (host join code)
+function createShortJoinCode() {
   return Math.random().toString(36).substr(2, 8);
 }
 
-// ================================
-// Modal buttons: when user chooses host or guest
-// ================================
-hostBtn.onclick = () => {
-  userName = userNameInput.value.trim() || "Host"; // Use entered name or default "Host"
-  userRole = "host"; // Set role
-  modal.style.display = "none"; // Hides modal
-  hostSectionEl.style.display = "block"; // Show host section
-  initPeer(); // Start the peer connection
-};
-
-guestBtn.onclick = () => {
-  userName = userNameInput.value.trim() || "Guest"; // Use entered name or default "Guest"
-  userRole = "guest"; // Set role
-  modal.style.display = "none"; // Hide modal
-  guestSectionEl.style.display = "block"; // Show guest section
-  initPeer(); // Start the peer connection
-};
-
-// ================================
-// Initialize Peer (host or guest)
-// ================================
-function initPeer() {
-  if (userRole === "host") {
-    // ================================
-    // Host creates a Peer with an ID
-    // ================================
-    const myPeerId = generateShortId();
-    peer = new Peer(myPeerId); // Using PeerJS library
-
-    // When peer is ready, show the ID
-    peer.on("open", (id) => {
-      peerIdDisplay.textContent = id; // Show the host ID so guest can connect
-      copyBtn.style.display = "inline"; // Show copy button
-    });
-
-    // When a guest connects
-    peer.on("connection", (connection) => {
-      conn = connection; // Save the connection object
-      conn.on("data", handleData); // Listen for messages from guest
-      conn.on("open", () => {
-        // When connection fully opens
-        showConnectedStatus(); // Show "connected" status
-      });
-    });
-  } else {
-    // ================================
-    // Guest creates a Peer without ID (host will assign)    ----------------------
-    // ================================
-    peer = new Peer();
-    peer.on("open", () => {
-      joinBtn.onclick = () => {
-        // When guest clicks "Join"
-        const hostId = peerInput.value.trim(); // Get host ID input
-        if (!hostId) return alert("Enter host's Peer ID");
-
-        conn = peer.connect(hostId); // Connect to host
-        status.textContent = `Connecting to ${hostId}...`;
-
-        conn.on("open", () => {
-          showConnectedStatus(); // Show connected status
-          status.textContent = `Connected to ${hostId}`;
-          setupConnection(); // Optional setup function (your own code)
-          conn.send({ type: "name", name: userName }); // Send guest name to host
-        });
-
-        conn.on("data", handleData); // Listen for messages from host
-      };
-    });
-  }
+// Return a UTC/GMT time label like "12:35 GMT"
+function getCurrentGmtTimeLabel() {
+  const now = new Date();
+  const hours = String(now.getUTCHours()).padStart(2, "0");
+  const minutes = String(now.getUTCMinutes()).padStart(2, "0");
+  return `${hours}:${minutes} GMT`;
 }
 
-// ================================
-// Copy button: copies host ID to clipboard
-// ================================
-copyBtn.onclick = () => {
-  const peerId = peerIdDisplay.textContent;
+// Play "new message" sound for incoming messages
+function playIncomingSound() {
+  incomingMessageSound.currentTime = 0;
+  incomingMessageSound.play().catch(() => {
+    // Ignore autoplay errors silently
+  });
+}
+
+// Return trimmed name only if user typed something
+function getValidatedName() {
+  const typedName = nameInput.value.trim();
+  if (!typedName) {
+    nameRequiredMessage.classList.add("visible");
+    return null;
+  }
+
+  nameRequiredMessage.classList.remove("visible");
+  return typedName;
+}
+
+// =====================================================
+// 4) Header + Presence UI
+// =====================================================
+
+// Show/hide each online row and toggle the green dots
+function setOnlineRows(topText, topActive, bottomText, bottomActive) {
+  const topRow = onlineNameTop.parentElement;
+  const bottomRow = onlineNameBottom.parentElement;
+
+  onlineNameTop.textContent = topText || "";
+  onlineNameBottom.textContent = bottomText || "";
+
+  onlineDotTop.classList.toggle("active", Boolean(topActive && topText));
+  onlineDotBottom.classList.toggle("active", Boolean(bottomActive && bottomText));
+
+  topRow.style.display = topText ? "flex" : "none";
+  bottomRow.style.display = bottomText ? "flex" : "none";
+}
+
+// Update online panel based on connection state
+function refreshOnlinePanel(isConnected) {
+  const localUserLine = `${localUserName} is online`;
+
+  // If connected and we know remote name, show both users
+  if (isConnected && remoteUserName) {
+    setOnlineRows(`${remoteUserName} is online`, true, localUserLine, true);
+    return;
+  }
+
+  // Otherwise show only the local user
+  setOnlineRows(localUserLine, true, "", false);
+}
+
+// Update header greeting: "Hello, Pedro!"
+function updateGreetingTitle() {
+  greetingText.textContent = `Hello, ${localUserName}!`;
+}
+
+// =====================================================
+// 5) Message Rendering
+// =====================================================
+
+// Render one chat message with metadata line above the bubble
+function renderMessage(messageText, side, senderName) {
+  const messageWrapper = document.createElement("div");
+  messageWrapper.className = `message-item ${
+    side === "me" ? "message-item-me" : "message-item-other"
+  }`;
+
+  const metaLine = document.createElement("div");
+  metaLine.className = "message-meta";
+  metaLine.textContent = `${senderName} | ${getCurrentGmtTimeLabel()}`;
+
+  const bubble = document.createElement("div");
+  bubble.className = `bubble ${side === "me" ? "me" : "other"}`;
+  bubble.textContent = messageText;
+
+  messageWrapper.appendChild(metaLine);
+  messageWrapper.appendChild(bubble);
+  chatMessagesContainer.appendChild(messageWrapper);
+
+  // Keep latest message visible
+  chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+}
+
+// =====================================================
+// 6) Connection Lifecycle (PeerJS)
+// =====================================================
+
+// Called when data connection is open
+function onConnectionOpen() {
+  refreshOnlinePanel(true);
+
+  // Send our name so the other side can show presence + message labels
+  activeConnection.send({ type: "name", name: localUserName });
+}
+
+// Handle any message received from peer
+function handleIncomingData(payload) {
+  // New format (objects)
+  if (typeof payload === "object") {
+    if (payload.type === "name") {
+      remoteUserName = payload.name;
+      refreshOnlinePanel(Boolean(activeConnection && activeConnection.open));
+      return;
+    }
+
+    if (payload.type === "message") {
+      renderMessage(payload.text, "them", payload.name || remoteUserName || "Peer");
+      playIncomingSound();
+    }
+
+    return;
+  }
+
+  // Fallback for legacy string payloads
+  renderMessage(String(payload), "them", remoteUserName || "Peer");
+  playIncomingSound();
+}
+
+// Wire all connection events in one place
+function registerConnectionEvents() {
+  activeConnection.on("open", onConnectionOpen);
+  activeConnection.on("data", handleIncomingData);
+
+  activeConnection.on("close", () => {
+    remoteUserName = "";
+    refreshOnlinePanel(false);
+  });
+}
+
+// Start PeerJS depending on selected role
+function startPeerForSelectedRole() {
+  if (localUserRole === "host") {
+    const newJoinCode = createShortJoinCode();
+    localPeer = new Peer(newJoinCode);
+
+    localPeer.on("open", (readyCode) => {
+      joinCodeText.textContent = readyCode;
+    });
+
+    // Host waits for guest connection
+    localPeer.on("connection", (connection) => {
+      activeConnection = connection;
+      registerConnectionEvents();
+    });
+
+    return;
+  }
+
+  // Guest creates peer without fixed id and then connects using host code
+  localPeer = new Peer();
+}
+
+// =====================================================
+// 7) Send / Join / Copy Actions
+// =====================================================
+
+function sendTypedMessage() {
+  const textToSend = messageTextInput.value.trim();
+  if (!textToSend || !activeConnection || !activeConnection.open) {
+    return;
+  }
+
+  renderMessage(textToSend, "me", localUserName);
+  activeConnection.send({ type: "message", name: localUserName, text: textToSend });
+  messageTextInput.value = "";
+}
+
+function connectGuestToHost() {
+  const hostJoinCode = joinCodeInput.value.trim();
+  if (!hostJoinCode || !localPeer) {
+    return;
+  }
+
+  activeConnection = localPeer.connect(hostJoinCode);
+  registerConnectionEvents();
+}
+
+function copyJoinCodeToClipboard() {
+  const code = joinCodeText.textContent;
+  if (!code || code === "---") {
+    return;
+  }
+
   navigator.clipboard
-    .writeText(peerId) // Copy text to clipboard
+    .writeText(code)
     .then(() => {
-      copyBtn.textContent = "Copied!"; // Temporary feedback
+      copyJoinCodeButton.innerHTML = '<i class="bi bi-check2"></i>';
       setTimeout(() => {
-        copyBtn.textContent = "Copy";
-      }, 1500);
+        copyJoinCodeButton.innerHTML = '<i class="bi bi-copy"></i>';
+      }, 1200);
     })
     .catch(() => {
-      alert("Failed to copy Peer ID."); // Error feedback
+      // Do nothing on copy error (UI has no status text by design)
     });
-};
+}
 
-// ================================
-// Send message button
-// ================================
-sendBtn.onclick = () => {
-  const message = messageInput.value.trim(); // Get typed message
-  if (!message || !conn) return; // Stop if empty or no connection
+// =====================================================
+// 8) Role Selection (Host / Guest)
+// =====================================================
 
-  appendMessage(`${userName}: ${message}`, "me"); // Show message in chat
-  conn.send({ type: "message", name: userName, text: message }); // Send message to peer
-  messageInput.value = ""; // Clear input
-};
-
-// ================================
-// Function to append a message to chat box
-// ================================
-function appendMessage(msg, sender) {
-  const p = document.createElement("p"); // Create <p> element for message
-  let cls = "";
-
-  // Determine CSS class based on sender and role
-  if (sender === "me") {
-    cls = userRole === "host" ? "message-me-host" : "message-me-guest";
-  } else {
-    cls = userRole === "host" ? "message-them-host" : "message-them-guest";
+function startAsHost() {
+  const validName = getValidatedName();
+  if (!validName) {
+    return;
   }
 
-  p.className = cls;
-  p.textContent = msg; // Add message text
-  chatBox.appendChild(p); // Add message to chat box
-  chatBox.scrollTop = chatBox.scrollHeight; // Scroll to bottom
+  localUserName = validName;
+  localUserRole = "host";
+
+  startModal.style.display = "none";
+  hostJoinCodeSection.style.display = "flex";
+  guestJoinCodeSection.style.display = "none";
+
+  updateGreetingTitle();
+  refreshOnlinePanel(false);
+  startPeerForSelectedRole();
 }
 
-// ================================
-// Show connection status
-// ================================
-function showConnectedStatus() {
-  connectionStatus.textContent = "You are connected!";
-  connectionStatus.style.display = "block";
-}
-
-// ================================
-// Handle incoming data from peer
-// ================================
-function handleData(data) {
-  if (typeof data === "object") {
-    // Modern structured messages
-    if (data.type === "name") {
-      peerName = data.name; // Save peer's name
-    } else if (data.type === "message") {
-      appendMessage(`${data.name}: ${data.text}`, "them"); // Show message
-    }
-  } else {
-    // Fallback for older string-only messages
-    appendMessage(`${peerName}: ${data}`, "them");
+function startAsGuest() {
+  const validName = getValidatedName();
+  if (!validName) {
+    return;
   }
+
+  localUserName = validName;
+  localUserRole = "guest";
+
+  startModal.style.display = "none";
+  hostJoinCodeSection.style.display = "none";
+  guestJoinCodeSection.style.display = "flex";
+
+  updateGreetingTitle();
+  refreshOnlinePanel(false);
+  startPeerForSelectedRole();
 }
 
-// ================================
-// Allow sending message by pressing Enter
-// ================================
-messageInput.addEventListener("keydown", function (e) {
-  if (e.key === "Enter") {
-    sendBtn.click(); // Trigger send button click
+// =====================================================
+// 9) Event Listeners
+// =====================================================
+
+hostRoleButton.onclick = startAsHost;
+guestRoleButton.onclick = startAsGuest;
+joinChatButton.onclick = connectGuestToHost;
+copyJoinCodeButton.onclick = copyJoinCodeToClipboard;
+sendMessageButton.onclick = sendTypedMessage;
+
+nameInput.addEventListener("input", () => {
+  nameRequiredMessage.classList.remove("visible");
+});
+
+messageTextInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    sendTypedMessage();
   }
 });
